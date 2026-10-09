@@ -300,7 +300,7 @@ footer a{color:var(--primary)}
       </div>
     </div>
     <div class="decide-ops">
-      <button class="mini-btn" id="resetVotes">清空票数</button>
+      <button class="mini-btn" id="resetVotes">清除选择</button>
       <button class="mini-btn" id="restoreAll">恢复所有候选</button>
       <button class="mini-btn" id="toggleExcluded">查看已排除</button>
     </div>
@@ -437,7 +437,7 @@ const state = {
 const BUDGET_RANGE = {'30':[0,30],'80':[30,80],'150':[80,150],'999':[150,9999]};
 
 /* —— 自定义玩法/美食 + 本地保存 —— */
-const LS_P = 'outPlan_customPlay', LS_F = 'outPlan_customFood';
+const LS_P = 'outPlan_customPlay', LS_F = 'outPlan_customFood', LS_S = 'outPlan_state';
 function mkCustomPlay(d, id){
   return {id:id||('c'+Date.now()+Math.random().toString(36).slice(2,6)), icon:'custom', name:d.name,
     price:d.price!=null?[d.price,d.price]:null, people:[1,99], time:['all'], env:null, rainSafe:true, zone:'any',
@@ -457,6 +457,29 @@ function saveCustom(){
   try{
     localStorage.setItem(LS_P, JSON.stringify(state.customPlay.map(it=>({id:it.id,name:it.name,price:it.price?it.price[0]:null}))));
     localStorage.setItem(LS_F, JSON.stringify(state.customFood.map(it=>({id:it.id,name:it.name,price:it.price?it.price[0]:null}))));
+  }catch(e){}
+}
+/* —— 投票/抽签结果/批次/排除项 持久化：退出页面依旧存在，清除选择才会重置 —— */
+function saveLocal(){
+  try{
+    localStorage.setItem(LS_S, JSON.stringify({
+      votes: state.votes, picked: state.picked,
+      batchPlay: state.batchPlay, batchFood: state.batchFood,
+      excluded: [...state.excluded]
+    }));
+  }catch(e){}
+}
+function loadLocal(){
+  try{
+    const d = JSON.parse(localStorage.getItem(LS_S) || 'null');
+    if (!d) return;
+    const validPlay = new Set(PLAY.map(p=>p.id));
+    const validFood = new Set(FOOD.map(f=>f.id));
+    if (d.votes && typeof d.votes === 'object') state.votes = d.votes;
+    if (d.picked) state.picked = d.picked;
+    if (Array.isArray(d.batchPlay) && d.batchPlay.length) state.batchPlay = d.batchPlay.filter(id => validPlay.has(id));
+    if (Array.isArray(d.batchFood) && d.batchFood.length) state.batchFood = d.batchFood.filter(id => validFood.has(id));
+    if (Array.isArray(d.excluded)) state.excluded = new Set(d.excluded);
   }catch(e){}
 }
 /* 区域选项：zone 用于筛选玩法（city城区/suburb近郊/any不限），name 用于高德搜索词 */
@@ -610,6 +633,22 @@ function render(){
   $('foodCards').innerHTML = showFoods.length ? showFoods.map(it=>cardHTML(it,'food')).join('') : '<div class="empty">按现在的条件没有匹配的美食，试试放宽预算。</div>';
   renderVotes();
   renderExcluded();
+  refreshPickBox();
+  saveLocal();
+}
+function findItem(id){
+  return [...PLAY, ...FOOD, ...state.customPlay, ...state.customFood].find(it => it.id === id);
+}
+/* 抽签结果框：与 picked 同步，刷新/换批后依旧显示 */
+function refreshPickBox(){
+  $('playPickBox').innerHTML = '';
+  $('foodPickBox').innerHTML = '';
+  if (!state.picked) return;
+  const it = findItem(state.picked);
+  if (!it) return;
+  const isPlay = PLAY.some(p=>p.id===it.id) || state.customPlay.some(c=>c.id===it.id);
+  (isPlay ? $('playPickBox') : $('foodPickBox')).innerHTML =
+    `<div class="pick-result">定了！就<strong>${it.name}</strong><small>点卡片再投一票确认，或去高德搜附近店</small></div>`;
 }
 
 /* —— 投票结果榜：实时同步显示 —— */
@@ -676,7 +715,6 @@ function doDraw(pool, box){
     } else {
       state.picked = target.id;
       render();
-      box.innerHTML = `<div class="pick-result">定了！就<strong>${target.name}</strong><small>点卡片再投一票确认，或去高德搜附近店</small></div>`;
     }
   };
   step();
@@ -739,8 +777,9 @@ $('amapLink').addEventListener('click', e => {
 
 /* —— 初次渲染：打开即见效果 —— */
 loadCustom();
+loadLocal();
 renderZones(state.city);
-newBatch();
+if (!state.batchPlay || !state.batchPlay.length) newBatch();
 render();
 </script>
 </body>
